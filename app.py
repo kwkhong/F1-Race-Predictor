@@ -1,48 +1,61 @@
 
 import streamlit as st
-import pandas as pd
+import openai
 import joblib
-import os
-from openai import OpenAI
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from openai import OpenAI
 
-# Load the ML model
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# Load model
 model = joblib.load("f1_model.pkl")
 
-# Prediction function
-def predict_top3(features):
-    try:
-        pred = model.predict([features])[0]
-        return "🏆 YES - Likely Top 3" if pred == 1 else "❌ NO - Likely not Top 3"
-    except Exception as e:
-        return f"Prediction error: {str(e)}"
+# Extract inputs from natural language
+def extract_inputs(user_input):
+    prompt = f"""Extract the following F1 race values from the text below.
+If a value is missing or uncertain, estimate a reasonable number (do NOT leave blank):
 
-# Function to extract inputs using GPT
-def extract_inputs(user_prompt):
-    prompt = f"""Extract the following values from this message and return as comma-separated values in this order:
-Grid Position, Qualifying Position, Driver Points, Driver Wins, Team Points, Team Wins, Year, Round.
-Message: {user_prompt}"""
+- Grid Position
+- Qualifying Position
+- Driver Points
+- Driver Wins
+- Team Points
+- Team Wins
+- Year
+- Round
+
+Text: {user_input}
+
+Return a Python list like this:
+[grid, qualy, driver_points, driver_wins, team_points, team_wins, year, round]
+"""
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2
     )
-    reply = response.choices[0].message.content.strip()
-    return [float(x.strip()) for x in reply.split(",")]
+    try:
+        text = response.choices[0].message.content.strip()
+        inputs = eval(text)
+        if not all(isinstance(i, (int, float)) for i in inputs):
+            raise ValueError("Some extracted values are not numbers.")
+        return inputs
+    except Exception as e:
+        raise ValueError(f"Error parsing inputs: {e}")
 
 # Streamlit UI
-st.title("🏎️ F1 Race Predictor - Chat Style")
-user_input = st.text_input("Ask your F1 prediction:")
+st.title("🏎️ F1 Top 3 Predictor")
+st.markdown("Ask a question like: **Will Verstappen finish top 3 if he starts P2 with 187 points and 2 wins in 2025?**")
+
+user_input = st.text_input("Enter your race question")
 
 if user_input:
     try:
-        features = extract_inputs(user_input)
-        if len(features) != 8:
-            st.error("❗Could not extract all 8 required values. Please try to rephrase.")
-        else:
-            result = predict_top3(features)
-            st.success(f"Prediction: {result}")
+        inputs = extract_inputs(user_input)
+        st.write("Extracted inputs:", inputs)
+        prediction = model.predict([inputs])[0]
+        result = "✅ YES - Likely Top 3" if prediction == 1 else "❌ NO - Unlikely Top 3"
+        st.success(result)
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Error: {e}")
