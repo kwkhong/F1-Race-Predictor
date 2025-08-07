@@ -1,61 +1,62 @@
-
 import streamlit as st
-import openai
+import pandas as pd
 import joblib
+import openai
+import os
 
-# Initialize OpenAI client
-from openai import OpenAI
+# Set your OpenAI API key (Streamlit Cloud reads from secrets)
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
-# Load model
+# Load model and data
 model = joblib.load("f1_model.pkl")
 
-# Extract inputs from natural language
-def extract_inputs(user_input):
-    prompt = f"""Extract the following F1 race values from the text below.
-If a value is missing or uncertain, estimate a reasonable number (do NOT leave blank):
+# Expected features for the model
+expected_keys = [
+    "grid", "qualifying", "points", "wins",
+    "points_constructor_standings", "wins_constructor_standings",
+    "year", "round"
+]
 
-- Grid Position
-- Qualifying Position
-- Driver Points
-- Driver Wins
-- Team Points
-- Team Wins
-- Year
-- Round
+def extract_inputs(user_message):
+    prompt = f"""Extract the following 8 values from this sentence: grid, qualifying, points, wins, points_constructor_standings, wins_constructor_standings, year, round.
+If any value is missing, return 0 for it. Just return a JSON object with the keys.
 
-Text: {user_input}
+Sentence: {user_message}"""
 
-Return a Python list like this:
-[grid, qualy, driver_points, driver_wins, team_points, team_wins, year, round]
-"""
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2
-    )
     try:
-        text = response.choices[0].message.content.strip()
-        inputs = eval(text)
-        if not all(isinstance(i, (int, float)) for i in inputs):
-            raise ValueError("Some extracted values are not numbers.")
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+        content = response.choices[0].message.content.strip()
+        values = eval(content)  # Very basic for now; assumes LLM gives Python-like dict
+
+        # Convert values safely to float
+        inputs = []
+        for k in expected_keys:
+            try:
+                inputs.append(float(values.get(k, 0)))
+            except (ValueError, TypeError):
+                inputs.append(0.0)
         return inputs
+
     except Exception as e:
-        raise ValueError(f"Error parsing inputs: {e}")
+        st.error(f"Error parsing inputs: {e}")
+        return [0.0] * 8
 
 # Streamlit UI
-st.title("🏎️ F1 Top 3 Predictor")
-st.markdown("Ask a question like: **Will Verstappen finish top 3 if he starts P2 with 187 points and 2 wins in 2025?**")
+st.title("🏎️ F1 Top 3 Chatbot Predictor")
+st.write("Ask a question like: *Will Verstappen win if he starts in P2 with 150 points and 3 wins?*")
 
-user_input = st.text_input("Enter your race question")
-
+user_input = st.text_input("Your Question")
 if user_input:
+    inputs = extract_inputs(user_input)
     try:
-        inputs = extract_inputs(user_input)
-        st.write("Extracted inputs:", inputs)
         prediction = model.predict([inputs])[0]
-        result = "✅ YES - Likely Top 3" if prediction == 1 else "❌ NO - Unlikely Top 3"
-        st.success(result)
+        if prediction == 1:
+            st.success("✅ YES — Likely Top 3 Finish!")
+        else:
+            st.warning("❌ NO — Likely NOT Top 3")
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Prediction Error: {e}")
