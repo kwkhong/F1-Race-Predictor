@@ -1,33 +1,59 @@
-
 import streamlit as st
-import pandas as pd
 import joblib
+import re
+from streamlit_chat import message
 
-# Load the model and dataset
+# Load model
 model = joblib.load("f1_model.pkl")
 
-st.set_page_config(page_title="🏎️ F1 Top 3 Predictor", layout="centered")
-st.title("🏁 F1 Top 3 Predictor")
-st.markdown("Enter race details to predict if the driver will finish in the **Top 3**!")
+# Chat function to parse input
+def parse_input(user_input):
+    pattern = r"grid\s*:?[\s]*(\d+)|qual(ifying)?\s*:?[\s]*(\d+)|driver points\s*:?[\s]*(\d+)|driver wins\s*:?[\s]*(\d+)|team points\s*:?[\s]*(\d+)|team wins\s*:?[\s]*(\d+)|year\s*:?[\s]*(\d{4})|round\s*:?[\s]*(\d+)"
+    matches = re.findall(pattern, user_input, re.IGNORECASE)
 
-# Input fields
-grid = st.number_input("Grid Position", min_value=1, max_value=20, value=1)
-qualy = st.number_input("Qualifying Position", min_value=1, max_value=20, value=1)
-driver_points = st.number_input("Driver Points", min_value=0)
-driver_wins = st.number_input("Driver Wins", min_value=0)
-team_points = st.number_input("Team Points", min_value=0)
-team_wins = st.number_input("Team Wins", min_value=0)
-year = st.number_input("Year", min_value=2000, max_value=2100, value=2023)
-round_num = st.number_input("Round Number", min_value=1, max_value=25, value=1)
+    inputs = [None] * 8  # 8 values: grid, qualy, d_pts, d_wins, t_pts, t_wins, year, round
+    for match in matches:
+        nums = [x for x in match if x.isdigit()]
+        if "grid" in match[0].lower():
+            inputs[0] = int(nums[0])
+        elif "qual" in match[1].lower():
+            inputs[1] = int(nums[0])
+        elif "driver points" in match[0].lower():
+            inputs[2] = int(nums[0])
+        elif "driver wins" in match[0].lower():
+            inputs[3] = int(nums[0])
+        elif "team points" in match[0].lower():
+            inputs[4] = int(nums[0])
+        elif "team wins" in match[0].lower():
+            inputs[5] = int(nums[0])
+        elif "year" in match[0].lower():
+            inputs[6] = int(nums[0])
+        elif "round" in match[0].lower():
+            inputs[7] = int(nums[0])
 
-# Prediction logic
-if st.button("Predict Top 3 Finish"):
+    if None in inputs:
+        raise ValueError("Missing some values. Please include all 8 inputs.")
+    return inputs
+
+# Streamlit app
+st.title("🏎️ F1 Race Top 3 Predictor Chatbot")
+st.markdown("Ask me if a driver will finish Top 3!")
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+user_input = st.text_input("Ask your question about an F1 race...")
+
+if user_input:
     try:
-        features = [[grid, qualy, driver_points, driver_wins, team_points, team_wins, year, round_num]]
-        prediction = model.predict(features)[0]
-        if prediction == 1:
-            st.success("✅ YES! This driver is likely to finish in the **Top 3** 🏆")
-        else:
-            st.warning("❌ No. This driver is unlikely to reach the Top 3.")
+        data = parse_input(user_input)
+        prediction = model.predict([data])[0]
+        result = "YES 🏆 Likely Top 3!" if prediction == 1 else "NO ❌ Unlikely Top 3."
     except Exception as e:
-        st.error(f"Prediction error: {e}")
+        result = f"Error: {str(e)}"
+
+    st.session_state.history.append((user_input, result))
+
+for i, (user, bot) in enumerate(st.session_state.history):
+    message(user, is_user=True, key=f"user_{i}")
+    message(bot, is_user=False, key=f"bot_{i}")
