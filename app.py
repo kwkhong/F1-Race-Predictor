@@ -1,58 +1,55 @@
 import streamlit as st
-from openai import OpenAI
+import openai
 import os
-import joblib
 import pandas as pd
-import re
+import joblib
 
-# Load OpenAI client using environment variable (from Streamlit secrets)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Load model and dataset
+# Load your model and data
 model = joblib.load("f1_model.pkl")
-df = pd.read_csv("f1_merged.csv")
 
-# Define function to extract numeric inputs from natural language
+# Set your OpenAI API key (from secret or env)
+openai.api_key = os.getenv("OPENAI_API_KEY", "sk-...your-key-here...")
 
-def extract_inputs(user_message):
-    prompt = f"""
-You are a data extractor for an F1 prediction AI.
-Given this input:
-"{user_message}"
-Extract and return the following 8 numbers in a list in this order:
-[grid, qualifying_position, driver_points, driver_wins, team_points, team_wins, year, round]
-If any are missing, make a reasonable guess based on typical F1 knowledge.
-Only return the Python list of 8 numbers. No explanation.
-"""
-    
-    response = client.chat.completions.create(
-        model="gpt-4",
+# Function to extract structured inputs from natural language
+def extract_inputs(user_input):
+    prompt = f"""Extract the following 8 F1 race prediction inputs from this user query:\n
+    1. Grid Position\n2. Qualifying Position\n3. Driver Points\n4. Driver Wins\n5. Team Points\n6. Team Wins\n7. Year\n8. Round\n
+    If anything is missing, estimate it reasonably.\n
+    Input: "{user_input}"\n
+    Return the result as a Python list in this order: [grid, qualy, driver_points, driver_wins, team_points, team_wins, year, round].""" 
+
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2
     )
-    result = response.choices[0].message.content
-    # Extract numbers from response
-    numbers = re.findall(r"[-+]?[0-9]*\.?[0-9]+", result)
-    if len(numbers) != 8:
-        raise ValueError("Missing some values. Please include all 8 inputs.")
-    return list(map(float, numbers))
-
-# Define prediction function
-def predict_from_text(user_input):
+    content = response['choices'][0]['message']['content']
     try:
-        inputs = extract_inputs(user_input)
+        values = eval(content)
+        if isinstance(values, list) and len(values) == 8:
+            return values
+    except:
+        pass
+    return None
+
+# Predict based on structured input
+def predict(inputs):
+    try:
         pred = model.predict([inputs])[0]
-        return "🏁 YES — Likely Top 3!" if pred == 1 else "❌ NO — Not likely top 3."
+        return "YES 🏆 - Likely Top 3" if pred == 1 else "NO ❌ - Likely not Top 3"
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error: {e}"
 
-# Streamlit UI
-st.title("🏎️ F1 Race Predictor — Chat Style")
-st.write("Ask a question like: 'Will Max win the next race if he starts P2 and has 150 points?'\nI'll try to estimate the result for you!")
+# Streamlit app layout
+st.title("🏎️ F1 Top 3 Predictor Chatbot")
+st.write("Ask your question in natural language (e.g. _'Will Verstappen win from P2 with 187 points?_'")
 
-user_input = st.text_input("Your Question:")
-
+user_input = st.text_input("Your Question")
 if user_input:
-    output = predict_from_text(user_input)
-    st.subheader("Prediction:")
-    st.write(output)
+    with st.spinner("Thinking..."):
+        inputs = extract_inputs(user_input)
+        if inputs:
+            result = predict(inputs)
+            st.success(result)
+        else:
+            st.error("❌ Sorry, I couldn't extract all 8 values or understand the input.")
