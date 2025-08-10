@@ -2,5 +2,5 @@ streamlit
 pandas
 scikit-learn
 joblib
-openai==1.35.14
-requests
+openai>=1.0.0
+tiktoken
