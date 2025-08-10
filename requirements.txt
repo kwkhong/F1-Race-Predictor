@@ -1,3 +1,6 @@
 streamlit
-openai
 pandas
+scikit-learn
+joblib
+openai==1.35.14
+requests
